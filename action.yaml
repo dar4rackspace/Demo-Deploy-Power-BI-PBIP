@@ -1,0 +1,73 @@
+name: Deploy 2 Power BI Service
+
+on:
+  workflow_dispatch: #when the user triggers the workflow, they will see a prompt to provide a value for env. This can be a string such as "PROD" or "UAT".
+  workflow_call:
+    inputs:
+      env:
+        required: true
+        type: string
+
+jobs:
+  deploy-2-powerbi:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"  # Adjust as needed
+          cache: 'pip'
+
+      - name: Install Python Dependencies
+        run: |
+          pip install -r .github/requirements.txt
+
+      - name: Get all changed PBIP Items
+        id: changed-pbi-files
+        uses: tj-actions/changed-files@v45
+        with:
+          since_last_remote_commit: true 
+          files: |
+            **.pbip
+            **.pbism
+            **.pbir
+            **.json
+            **.bim
+            **.platform
+            **/report_config.yaml
+          write_output_files: true
+          output_dir: ".github/outputs"
+          separator: ","
+
+      - name: List all changed files
+        id: list-changed-files
+        run: |
+          all_changed_files="${{ steps.changed-pbi-files.outputs.all_changed_files }}"
+          echo "All changed files: $all_changed_files"
+          if [ -z "$all_changed_files" ]; then
+            echo "No files changed. Skipping subsequent steps."
+            exit 0
+          fi
+          # Use IFS to handle whitespace correctly
+          IFS=',' read -r -a files_array <<< "$all_changed_files"
+          for file in "${files_array[@]}"; do
+            echo "$file" >> changed_files.txt
+          done
+        
+      - name: Deploy Power BI Project
+        if: steps.changed-pbi-files.outputs.all_changed_files != ''
+        env:
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          TENANT_ID: ${{ secrets.TENANT_ID }}
+          ENV: ${{ inputs.env }}  # Pass the env input to the Python script
+        run: |
+          # Set the PYTHONPATH to include the scripts directory
+          export PYTHONPATH="${{ github.workspace }}/.github"
+          python3 .github/scripts/deploy_2_powerbi.py changed_files.txt "${{ inputs.env }}"
